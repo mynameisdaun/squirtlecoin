@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/mynameisdaun/squirtlecoin/blockchain"
+	"github.com/mynameisdaun/squirtlecoin/utils"
 	"log"
 	"net/http"
 )
@@ -55,8 +56,9 @@ func blocks(rw http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(rw).Encode(blockchain.GetBlockchain().AllBlocks())
 	case "POST":
 		var addBlockBody AddBlockBody
-		json.NewDecoder(r.Body).Decode(&addBlockBody)
-
+		utils.HandleErr(json.NewDecoder(r.Body).Decode(&addBlockBody))
+		blockchain.GetBlockchain().AddBlock(addBlockBody.Message)
+		rw.WriteHeader(http.StatusCreated)
 	}
 }
 
