@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"github.com/mynameisdaun/squirtlecoin/explorer"
 	"github.com/mynameisdaun/squirtlecoin/rest"
-	"os"
+	"runtime"
 )
 
 func usage() {
@@ -13,10 +13,10 @@ func usage() {
 	fmt.Printf("Please use the following flags:\n\n")
 	fmt.Printf("-port=4000:	Set the PORT of the server\n")
 	fmt.Printf("-mode=rest: Choose between 'html' and 'rest'\n\n")
-	os.Exit(1)
+	runtime.Goexit() // defer는 실행한다
 }
 
-func start() {
+func Start() {
 	port := flag.Int("port", 4000, "Set port of the server")
 	mode := flag.String("mode", "rest", "Choose between 'HTML' and 'rest'")
 
