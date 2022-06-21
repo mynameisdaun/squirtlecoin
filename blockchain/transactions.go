@@ -3,6 +3,7 @@ package blockchain
 import (
 	"errors"
 	"github.com/mynameisdaun/squirtlecoin/utils"
+	"github.com/mynameisdaun/squirtlecoin/wallet"
 	"time"
 )
 
@@ -24,14 +25,14 @@ type mempool struct {
 var Mempool *mempool = &mempool{}
 
 type TxIn struct {
-	TxID  string
-	Index int
-	Owner string
+	TxID      string `json:"txId"`
+	Index     int    `json:"index"`
+	Signature string `json:"signature"`
 }
 
 type TxOut struct {
-	Owner  string
-	Amount int
+	Address string `json:"address"`
+	Amount  int    `json:"amount"`
 }
 
 type UTxOut struct {
@@ -40,24 +41,24 @@ type UTxOut struct {
 	Amount int
 }
 
-func (t *Tx) getId() {
-	t.Id = utils.Hash(t)
-}
+var ErrorNoMoney = errors.New("not enough 돈")
+var ErrorNotValid = errors.New("transaction invalid")
 
 func makeCoinbaseTx(address string) *Tx {
 	txIns := []*TxIn{
 		{"", -1, "COINBASE"},
 	}
-	txOutss := []*TxOut{
+	txOuts := []*TxOut{
 		{address, mineReward},
 	}
 	tx := Tx{
 		Id:        "",
 		Timestamp: int(time.Now().Unix()),
 		TxIns:     txIns,
-		TxOuts:    txOutss,
+		TxOuts:    txOuts,
 	}
 	tx.getId()
+	tx.sign()
 	return &tx
 }
 
@@ -89,11 +90,17 @@ func makeTx(from, to string, amount int) (*Tx, error) {
 		TxIns:     txIns,
 		TxOuts:    txOuts,
 	}
+	tx.getId()
+	tx.sign()
+	valid := validate(tx)
+	if !valid {
+		return nil, ErrorNotValid
+	}
 	return tx, nil
 }
 
 func (m *mempool) AddTx(to string, amount int) error {
-	tx, err := makeTx("daun", to, amount)
+	tx, err := makeTx(wallet.Wallet().Address, to, amount)
 	if err != nil {
 		return err
 	}
@@ -102,7 +109,7 @@ func (m *mempool) AddTx(to string, amount int) error {
 }
 
 func (m *mempool) TxToConfirm() []*Tx {
-	coinbase := makeCoinbaseTx("daun")
+	coinbase := makeCoinbaseTx(wallet.Wallet().Address)
 	txs := m.Txs
 	txs = append(txs, coinbase)
 	m.Txs = nil
@@ -118,4 +125,31 @@ func IsOnMempool(uTxOut *UTxOut) bool {
 		}
 	}
 	return false
+}
+
+func (t *Tx) getId() {
+	t.Id = utils.Hash(t)
+}
+
+func (t *Tx) sign() {
+	for _, txIn := range t.TxIns {
+		txIn.Signature = wallet.Sign(t.Id, wallet.Wallet())
+	}
+}
+
+func validate(tx *Tx) bool {
+	valid := true
+	for _, txIn := range tx.TxIns {
+		prevTx := FindTx(Blockchain(), txIn.TxID)
+		if prevTx == nil {
+			valid = false
+			break
+		}
+		address := prevTx.TxOuts[txIn.Index].Address
+		valid = wallet.Verify(txIn.Signature, tx.Id, address)
+		if !valid {
+			break
+		}
+	}
+	return valid
 }
