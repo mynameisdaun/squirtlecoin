@@ -4,6 +4,7 @@ import (
 	"errors"
 	"github.com/mynameisdaun/squirtlecoin/utils"
 	"github.com/mynameisdaun/squirtlecoin/wallet"
+	"sync"
 	"time"
 )
 
@@ -11,18 +12,20 @@ const (
 	mineReward int = 50
 )
 
+var memOnce sync.Once
+var m *mempool
+
+type mempool struct {
+	Txs []*Tx
+	m   sync.Mutex
+}
+
 type Tx struct {
-	Id        string   `json:"id"`
+	ID        string   `json:"id"`
 	Timestamp int      `json:"timestamp"`
 	TxIns     []*TxIn  `json:"txIns"`
 	TxOuts    []*TxOut `json:"txOuts"`
 }
-
-type mempool struct {
-	Txs []*Tx
-}
-
-var Mempool *mempool = &mempool{}
 
 type TxIn struct {
 	TxID      string `json:"txId"`
@@ -36,13 +39,57 @@ type TxOut struct {
 }
 
 type UTxOut struct {
-	TxId   string
-	Index  int
-	Amount int
+	TxID   string `json:"txId"`
+	Index  int    `json:"index"`
+	Amount int    `json:"amount"`
 }
 
-var ErrorNoMoney = errors.New("not enough 돈")
-var ErrorNotValid = errors.New("transaction invalid")
+func (t *Tx) getId() {
+	t.ID = utils.Hash(t)
+}
+
+func (t *Tx) sign() {
+	for _, txIn := range t.TxIns {
+		txIn.Signature = wallet.Sign(t.ID, wallet.Wallet())
+	}
+}
+
+func validate(tx *Tx) bool {
+	valid := true
+	for _, txIn := range tx.TxIns {
+		prevTx := FindTx(Blockchain(), txIn.TxID)
+		if prevTx == nil {
+			valid = false
+			break
+		}
+		address := prevTx.TxOuts[txIn.Index].Address
+		valid = wallet.Verify(txIn.Signature, tx.ID, address)
+		if !valid {
+			break
+		}
+	}
+	return valid
+}
+
+func isOnMempool(uTxOut *UTxOut) (exists bool) {
+Outer:
+	for _, tx := range Mempool().Txs {
+		for _, input := range tx.TxIns {
+			if input.TxID == uTxOut.TxID && input.Index == uTxOut.Index {
+				exists = true
+				break Outer
+			}
+		}
+	}
+	return
+}
+
+func Mempool() *mempool {
+	memOnce.Do(func() {
+		m = &mempool{}
+	})
+	return m
+}
 
 func makeCoinbaseTx(address string) *Tx {
 	txIns := []*TxIn{
@@ -52,19 +99,21 @@ func makeCoinbaseTx(address string) *Tx {
 		{address, mineReward},
 	}
 	tx := Tx{
-		Id:        "",
+		ID:        "",
 		Timestamp: int(time.Now().Unix()),
 		TxIns:     txIns,
 		TxOuts:    txOuts,
 	}
 	tx.getId()
-	tx.sign()
 	return &tx
 }
 
+var ErrorNoMoney = errors.New("not enough 돈")
+var ErrorNotValid = errors.New("transaction invalid")
+
 func makeTx(from, to string, amount int) (*Tx, error) {
 	if BalanceByAddress(from, Blockchain()) < amount {
-		return nil, errors.New("not enough money")
+		return nil, ErrorNoMoney
 	}
 	var txOuts []*TxOut
 	var txIns []*TxIn
@@ -74,7 +123,7 @@ func makeTx(from, to string, amount int) (*Tx, error) {
 		if total >= amount {
 			break
 		}
-		txIn := &TxIn{uTxOut.TxId, uTxOut.Index, from}
+		txIn := &TxIn{uTxOut.TxID, uTxOut.Index, from}
 		txIns = append(txIns, txIn)
 		total += uTxOut.Amount
 	}
@@ -85,7 +134,7 @@ func makeTx(from, to string, amount int) (*Tx, error) {
 	txOut := &TxOut{to, amount}
 	txOuts = append(txOuts, txOut)
 	tx := &Tx{
-		Id:        "",
+		ID:        "",
 		Timestamp: int(time.Now().Unix()),
 		TxIns:     txIns,
 		TxOuts:    txOuts,
@@ -99,13 +148,13 @@ func makeTx(from, to string, amount int) (*Tx, error) {
 	return tx, nil
 }
 
-func (m *mempool) AddTx(to string, amount int) error {
+func (m *mempool) AddTx(to string, amount int) (*Tx, error) {
 	tx, err := makeTx(wallet.Wallet().Address, to, amount)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	m.Txs = append(m.Txs, tx)
-	return nil
+	return tx, nil
 }
 
 func (m *mempool) TxToConfirm() []*Tx {
@@ -116,40 +165,8 @@ func (m *mempool) TxToConfirm() []*Tx {
 	return txs
 }
 
-func IsOnMempool(uTxOut *UTxOut) bool {
-	for _, tx := range Mempool.Txs {
-		for _, input := range tx.TxIns {
-			if input.TxID == uTxOut.TxId && input.Index == uTxOut.Index {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func (t *Tx) getId() {
-	t.Id = utils.Hash(t)
-}
-
-func (t *Tx) sign() {
-	for _, txIn := range t.TxIns {
-		txIn.Signature = wallet.Sign(t.Id, wallet.Wallet())
-	}
-}
-
-func validate(tx *Tx) bool {
-	valid := true
-	for _, txIn := range tx.TxIns {
-		prevTx := FindTx(Blockchain(), txIn.TxID)
-		if prevTx == nil {
-			valid = false
-			break
-		}
-		address := prevTx.TxOuts[txIn.Index].Address
-		valid = wallet.Verify(txIn.Signature, tx.Id, address)
-		if !valid {
-			break
-		}
-	}
-	return valid
+func (m *mempool) AddPeerTx(tx *Tx) {
+	m.m.Lock()
+	defer m.m.Unlock()
+	m.Txs = append(m.Txs, tx)
 }

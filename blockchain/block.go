@@ -23,10 +23,9 @@ func (b *Block) restore(data []byte) {
 	utils.FromBytes(b, data)
 }
 
-func (b *Block) persist() {
+func persistBlock(b *Block) {
 	db.SaveBlock(b.Hash, utils.ToBytes(b))
 }
-
 func (b *Block) mine() {
 	target := strings.Repeat("0", b.Difficulty)
 	for {
@@ -50,8 +49,8 @@ func createBlock(prevHash string, height int, diff int) *Block {
 		Nounce:     0,
 	}
 	block.mine()
-	block.Transactions = Mempool.TxToConfirm()
-	block.persist()
+	block.Transactions = Mempool().TxToConfirm()
+	persistBlock(block)
 	fmt.Printf("hash: %s\n", block.Hash)
 	return block
 }

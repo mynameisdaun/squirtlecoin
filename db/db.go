@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/boltdb/bolt"
 	"github.com/mynameisdaun/squirtlecoin/utils"
+	"os"
 )
 
 const (
@@ -15,9 +16,14 @@ const (
 
 var db *bolt.DB
 
+func getDbname() string {
+	port := os.Args[2][6:]
+	return fmt.Sprintf("%s_%s.db", dbName, port)
+}
+
 func DB() *bolt.DB {
 	if db == nil {
-		dbPointer, err := bolt.Open(dbName, 0600, nil)
+		dbPointer, err := bolt.Open(getDbname(), 0600, nil)
 		db = dbPointer
 		utils.HandleErr(err)
 		err = db.Update(func(tx *bolt.Tx) error {
@@ -72,4 +78,13 @@ func Block(hash string) []byte {
 		return nil
 	})
 	return data
+}
+
+func EmptyBlocks() {
+	DB().Update(func(tx *bolt.Tx) error {
+		utils.HandleErr(tx.DeleteBucket([]byte(blocksBucket)))
+		_, err := tx.CreateBucket([]byte(blocksBucket))
+		utils.HandleErr(err)
+		return nil
+	})
 }

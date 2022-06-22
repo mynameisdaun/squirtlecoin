@@ -1,8 +1,10 @@
 package blockchain
 
 import (
+	"encoding/json"
 	"github.com/mynameisdaun/squirtlecoin/db"
 	"github.com/mynameisdaun/squirtlecoin/utils"
+	"net/http"
 	"sync"
 )
 
@@ -10,6 +12,7 @@ type blockchain struct {
 	NewestHash        string `json:"newestHash"`
 	Height            int    `json:"height"`
 	CurrentDifficulty int    `json:"currentDifficulty"`
+	m                 sync.Mutex
 }
 
 var b *blockchain
@@ -30,15 +33,18 @@ func persistBlockchain(b *blockchain) {
 	db.SaveBlockChain(utils.ToBytes(b))
 }
 
-func (b *blockchain) AddBlock() {
+func (b *blockchain) AddBlock() *Block {
 	block := createBlock(b.NewestHash, b.Height+1, getDifficulty(b))
 	b.NewestHash = block.Hash
 	b.Height = block.Height
 	b.CurrentDifficulty = block.Difficulty
 	persistBlockchain(b)
+	return block
 }
 
 func Blocks(b *blockchain) []*Block {
+	b.m.Lock()
+	defer b.m.Unlock()
 	var blocks []*Block
 	hashCursor := b.NewestHash
 	for {
@@ -51,6 +57,12 @@ func Blocks(b *blockchain) []*Block {
 		}
 	}
 	return blocks
+}
+
+func Status(b *blockchain, rw http.ResponseWriter) {
+	b.m.Lock()
+	defer b.m.Unlock()
+	utils.HandleErr(json.NewEncoder(rw).Encode(b))
 }
 
 func (b *blockchain) txOuts() []*TxOut {
@@ -67,6 +79,7 @@ func (b *blockchain) txOuts() []*TxOut {
 func UTxOutsByAddress(address string, b *blockchain) []*UTxOut {
 	var uTxOuts []*UTxOut
 	creatorTxs := make(map[string]bool)
+
 	for _, block := range Blocks(b) {
 		for _, tx := range block.Transactions {
 			for _, input := range tx.TxIns {
@@ -80,10 +93,10 @@ func UTxOutsByAddress(address string, b *blockchain) []*UTxOut {
 			}
 			for index, output := range tx.TxOuts {
 				if output.Address == address {
-					if _, ok := creatorTxs[tx.Id]; !ok {
+					if _, ok := creatorTxs[tx.ID]; !ok {
 						//인풋으로 사용되지 않은 tx에 한해서
-						uTxOut := &UTxOut{tx.Id, index, output.Amount}
-						if !IsOnMempool(uTxOut) {
+						uTxOut := &UTxOut{tx.ID, index, output.Amount}
+						if !isOnMempool(uTxOut) {
 							uTxOuts = append(uTxOuts, uTxOut)
 						}
 					}
@@ -149,11 +162,39 @@ func Txs(b *blockchain) []*Tx {
 	return txs
 }
 
-func FindTx(b *blockchain, txID string) *Tx {
+func FindTx(b *blockchain, targetId string) *Tx {
 	for _, tx := range Txs(b) {
-		if tx.Id == txID {
+		if tx.ID == targetId {
 			return tx
 		}
 	}
 	return nil
+}
+
+func (b *blockchain) Replace(newBlocks []*Block) {
+	b.m.Lock()
+	defer b.m.Unlock()
+	b.CurrentDifficulty = newBlocks[0].Difficulty
+	b.Height = len(newBlocks)
+	b.NewestHash = newBlocks[0].Hash
+	persistBlockchain(b)
+	db.EmptyBlocks()
+	for _, block := range newBlocks {
+		persistBlock(block)
+	}
+
+}
+
+func (b *blockchain) AddPeerBlock(block *Block) {
+	b.m.Lock()
+	defer b.m.Unlock()
+
+	b.Height += 1
+	b.CurrentDifficulty = block.Difficulty
+	b.NewestHash = block.Hash
+
+	persistBlockchain(b)
+	persistBlock(block)
+
+	//TODO: mempool
 }
