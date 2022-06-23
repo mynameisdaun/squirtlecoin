@@ -2,7 +2,6 @@ package blockchain
 
 import (
 	"errors"
-	"fmt"
 	"github.com/mynameisdaun/squirtlecoin/db"
 	"github.com/mynameisdaun/squirtlecoin/utils"
 	"strings"
@@ -51,7 +50,6 @@ func createBlock(prevHash string, height int, diff int) *Block {
 	block.mine()
 	block.Transactions = Mempool().TxToConfirm()
 	persistBlock(block)
-	fmt.Printf("hash: %s\n", block.Hash)
 	return block
 }
 
