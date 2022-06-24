@@ -1,3 +1,4 @@
+// Package utils contains function to be used across the application
 package utils
 
 import (
@@ -23,11 +24,13 @@ func ToBytes(i interface{}) []byte {
 	return buffer.Bytes()
 }
 
+// FromBytes takes an interface and data and then will encode the data
 func FromBytes(i interface{}, data []byte) {
 	decoder := gob.NewDecoder(bytes.NewReader(data))
 	HandleErr(decoder.Decode(i))
 }
 
+// Hash takes an interface, hashes it
 func Hash(i interface{}) string {
 	str := fmt.Sprint(i)
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(str)))
